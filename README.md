@@ -66,6 +66,15 @@ python3 -c "from moveit.planning import MoveItPy; print('moveit_py OK')"
 > 다른 MoveIt 워크스페이스를 source 한 채로 빌드하면 버전이 어긋나
 > `libgeometric_shapes.so...: cannot open shared object file` 같은 오류가 납니다.
 
+> **MoveIt 튜토리얼대로 소스 빌드(`~/ws_moveit`)를 이미 하셨다면**
+> 1·2번을 건너뛰고 `source ~/ws_moveit/install/setup.bash` 만 하면 됩니다.
+> 그 안에 `moveit_configs_utils` 와 `moveit_py` 가 모두 들어 있습니다.
+> 대신 **apt MoveIt 은 깔지 마세요.** 둘을 섞으면 깨집니다.
+>
+> 소스 빌드는 `sudo apt upgrade` 한 번에 깨질 수 있습니다(라이브러리 버전이
+> 어긋남). 그때는 MoveIt 전체를 다시 빌드해야 해서 한 시간 넘게 걸립니다.
+> 수업용으로는 1+2 방식(apt + `moveit_py` 만 소스)이 복구가 2분이라 안전합니다.
+
 ### 3. 두산 로봇 패키지
 
 ```bash
@@ -150,20 +159,24 @@ source ~/.bashrc
 이 한 줄이 ROS 2 → `moveit_py` → 두산 패키지 → 이 워크스페이스를 **전부** 끌어옵니다.
 따로 `ros2_ws` 나 `ws_moveit` 을 source 하지 마세요.
 
-> **주의 — `ws_moveit` 은 절대 넣지 마세요.**
-> `~/ws_moveit` 은 옛 라이브러리로 빌드돼 있어서, source 하면 정상 MoveIt 을 가려
-> `move_group` 이 죽고 RViz 플러그인이 안 뜹니다.
-> `~/ros2_ws/install/setup.bash` 도 안에서 `ws_moveit` 을 끌어오므로 쓰지 마세요.
-> (`local_setup.bash` 는 괜찮습니다)
+> **주의 — MoveIt 은 한 곳에서만 오게 하세요.**
+> apt 로 깐 MoveIt 과 소스로 빌드한 MoveIt(`~/ws_moveit`)을 **둘 다 source 하면**
+> 버전이 엉켜서 `move_group` 이 죽고 RViz 플러그인이 안 뜹니다.
+> 위의 [처음 설치](#처음-설치하는-컴퓨터에서) 에서 고른 방식 하나만 쓰세요.
 >
-> 지금 터미널이 오염됐는지 확인하는 법
+> 증상은 보통 이렇게 나타납니다.
 >
-> ```bash
-> echo $AMENT_PREFIX_PATH | tr ':' '\n' | grep ws_moveit   # 아무것도 안 나와야 정상
+> ```
+> libgeometric_shapes.so.2.3.2: cannot open shared object file
 > ```
 >
-> 한 줄이라도 나오면 그 터미널은 못 씁니다. `source` 는 경로를 덧붙일 뿐
-> 지우지 않으므로 **새 터미널**을 열어야 합니다.
+> 지금 터미널에 무엇이 잡혀 있는지 보는 법
+>
+> ```bash
+> echo $AMENT_PREFIX_PATH | tr ':' '\n' | grep -i moveit
+> ```
+>
+> `source` 는 경로를 덧붙일 뿐 지우지 않습니다. 섞였다면 **새 터미널**을 여세요.
 
 ## 빌드 (처음 한 번만)
 
@@ -265,7 +278,8 @@ python3 src/voice_robot_control/voice_robot_control/nlp_node.py "안녕"
 |---|---|
 | `No module named 'moveit_configs_utils'` | `sudo apt install ros-humble-moveit` |
 | `No module named 'moveit'` / `MoveItPy` 없음 | `moveit_py` 를 안 빌드했습니다 → [2번](#2-moveit_py-소스-빌드-약-2분) |
-| `libgeometric_shapes.so...: cannot open` | 옛 MoveIt 워크스페이스가 섞였습니다. 새 터미널을 여세요 |
+| `libgeometric_shapes.so...: cannot open` | apt MoveIt 과 소스 MoveIt 이 섞였습니다. 새 터미널에서 하나만 source |
+| `dsr.srdf.xacro doesn't exist` | 오래된 버전입니다. `git pull` 후 다시 빌드하세요 |
 | `Package 'dsr_moveit_config_m0609' not found` | 두산 패키지가 없습니다 → [3번](#3-두산-로봇-패키지) |
 | `No module named 'speech_recognition'` | `pip install SpeechRecognition pyaudio` |
 | 그리퍼가 안 움직임 | `pip install "pymodbus==2.5.3"` (3.x 는 안 됩니다) |

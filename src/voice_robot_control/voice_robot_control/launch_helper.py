@@ -17,6 +17,12 @@ PACKAGE = "voice_robot_control"
 def moveit_config():
     """두산 M0609 용 MoveIt 설정을 만든다.
 
+    파일 이름을 하나하나 적어주는 이유:
+      적지 않으면 MoveIt 이 파일 이름을 스스로 추측하는데, 그 규칙이
+      MoveIt 판마다 달라서 어떤 컴퓨터에서는 "dsr.srdf.xacro 가 없다" 처럼
+      엉뚱한 이름을 찾는다. 두산 패키지의 실제 이름을 그대로 적어두면
+      어느 컴퓨터에서든 똑같이 동작한다.
+
     planning_pipelines 와 pilz_cartesian_limits 를 빠뜨리면
     좌표로 이동할 때 "가는 길을 찾지 못했습니다" 가 뜬다.
     """
@@ -25,17 +31,17 @@ def moveit_config():
             robot_name="m0609",
             package_name="dsr_moveit_config_m0609",
         )
-        .robot_description()
-        .robot_description_semantic()
-        .robot_description_kinematics()
-        .joint_limits()
-        .trajectory_execution()
+        .robot_description(file_path="config/m0609.urdf.xacro")
+        .robot_description_semantic(file_path="config/dsr.srdf")
+        .robot_description_kinematics(file_path="config/kinematics.yaml")
+        .joint_limits(file_path="config/joint_limits.yaml")
+        .trajectory_execution(file_path="config/moveit_controllers.yaml")
         .planning_scene_monitor()
         .planning_pipelines(
             default_planning_pipeline="ompl",
             pipelines=["ompl", "pilz_industrial_motion_planner"],
         )
-        .pilz_cartesian_limits()
+        .pilz_cartesian_limits(file_path="config/pilz_cartesian_limits.yaml")
         .to_moveit_configs()
     )
 
