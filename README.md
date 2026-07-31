@@ -57,6 +57,44 @@ git pull
 > git checkout -- src/voice_robot_control/config/keyword_map.yaml
 > ```
 
+## 한 번만 설정 — 터미널마다 source 안 하기
+
+터미널을 열 때마다 `source` 를 치는 게 번거로우면 `~/.bashrc` 맨 아래에
+아래 두 줄을 넣어 두세요. 그다음부터는 새 터미널에서 바로 쓸 수 있습니다.
+
+```bash
+# 두산 음성 로봇 워크스페이스
+[ -f ~/doosan_voice_ws/install/setup.bash ] && source ~/doosan_voice_ws/install/setup.bash
+```
+
+한 줄로 넣는 명령
+
+```bash
+echo '[ -f ~/doosan_voice_ws/install/setup.bash ] && source ~/doosan_voice_ws/install/setup.bash' >> ~/.bashrc
+source ~/.bashrc
+```
+
+> `[ -f ... ] &&` 를 앞에 붙인 이유는 **아직 빌드하기 전**이라도 오류가 안 나게 하기 위해서입니다.
+> 이게 없으면 `colcon build` 전에는 새 터미널마다 빨간 오류가 뜹니다.
+
+이 한 줄이 ROS 2 → `moveit_py` → 두산 패키지 → 이 워크스페이스를 **전부** 끌어옵니다.
+따로 `ros2_ws` 나 `ws_moveit` 을 source 하지 마세요.
+
+> **주의 — `ws_moveit` 은 절대 넣지 마세요.**
+> `~/ws_moveit` 은 옛 라이브러리로 빌드돼 있어서, source 하면 정상 MoveIt 을 가려
+> `move_group` 이 죽고 RViz 플러그인이 안 뜹니다.
+> `~/ros2_ws/install/setup.bash` 도 안에서 `ws_moveit` 을 끌어오므로 쓰지 마세요.
+> (`local_setup.bash` 는 괜찮습니다)
+>
+> 지금 터미널이 오염됐는지 확인하는 법
+>
+> ```bash
+> echo $AMENT_PREFIX_PATH | tr ':' '\n' | grep ws_moveit   # 아무것도 안 나와야 정상
+> ```
+>
+> 한 줄이라도 나오면 그 터미널은 못 씁니다. `source` 는 경로를 덧붙일 뿐
+> 지우지 않으므로 **새 터미널**을 열어야 합니다.
+
 ## 빠르게 해 보기
 
 ```bash
