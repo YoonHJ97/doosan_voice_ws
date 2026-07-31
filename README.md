@@ -26,6 +26,76 @@ ROS 2를 처음 접하는 학생이 **YAML 파일만 고쳐서** 로봇을 다�
 난이도 순서대로 배우도록 되어 있습니다. ①~⑤는 코드를 읽고 고치는 실습,
 ⑥~⑧은 함께 켜서 말로 로봇을 움직이는 통합 실습입니다.
 
+## 처음 설치하는 컴퓨터에서
+
+새 노트북에 처음 올릴 때는 아래 4개를 먼저 갖춰야 합니다.
+이미 되어 있는 컴퓨터라면 [내려받기](#내려받기) 로 건너뛰세요.
+
+### 1. MoveIt 2 (apt)
+
+```bash
+sudo apt install ros-humble-moveit
+```
+
+이게 없으면 `ModuleNotFoundError: No module named 'moveit_configs_utils'` 가 뜹니다.
+경로 계획기(OMPL·Pilz)와 RViz 플러그인도 여기 들어 있습니다.
+
+### 2. moveit_py (소스 빌드, 약 2분)
+
+**Humble 의 apt 에는 `moveit_py` 가 없습니다.** 파이썬으로 로봇을 움직이려면
+이것만 따로 빌드해야 합니다. MoveIt 전체를 빌드할 필요는 없습니다.
+
+```bash
+mkdir -p ~/moveit_py_ws/src && cd ~/moveit_py_ws/src
+git clone -b humble https://github.com/ros-planning/moveit2.git
+
+cd ~/moveit_py_ws
+source /opt/ros/humble/setup.bash          # ← 다른 워크스페이스는 source 하지 말 것
+colcon build --packages-select moveit_py --cmake-args -DCMAKE_BUILD_TYPE=Release
+```
+
+잘 됐는지 확인
+
+```bash
+source ~/moveit_py_ws/install/setup.bash
+python3 -c "from moveit.planning import MoveItPy; print('moveit_py OK')"
+```
+
+> `moveit_py` 는 apt 로 깐 MoveIt(2.5.9)에 맞춰 빌드돼야 합니다.
+> 그래서 빌드할 때 `/opt/ros/humble` 만 source 합니다.
+> 다른 MoveIt 워크스페이스를 source 한 채로 빌드하면 버전이 어긋나
+> `libgeometric_shapes.so...: cannot open shared object file` 같은 오류가 납니다.
+
+### 3. 두산 로봇 패키지
+
+```bash
+mkdir -p ~/ros2_ws/src && cd ~/ros2_ws/src
+git clone https://github.com/doosan-robotics/doosan-robot2.git
+cd ~/ros2_ws && rosdep install --from-paths src --ignore-src -r -y
+colcon build
+```
+
+### 4. 파이썬 라이브러리
+
+```bash
+sudo apt install portaudio19-dev
+pip install SpeechRecognition pyaudio gtts pygame "pymodbus==2.5.3"
+```
+
+`pymodbus` 는 **2.5.3** 이어야 합니다 (3.x 는 API 가 달라 그리퍼가 안 됩니다).
+
+### 설치 확인
+
+```bash
+source ~/doosan_voice_ws/install/setup.bash
+python3 -c "import moveit_configs_utils; print('1. moveit_configs_utils OK')"
+python3 -c "from moveit.planning import MoveItPy; print('2. moveit_py OK')"
+ros2 pkg prefix dsr_moveit_config_m0609 && echo "3. 두산 패키지 OK"
+python3 -c "import speech_recognition, gtts, pygame, pymodbus; print('4. 파이썬 라이브러리 OK')"
+```
+
+---
+
 ## 내려받기
 
 처음 받을 때 — **홈 폴더에서** 받아야 `~/doosan_voice_ws` 가 됩니다.
@@ -95,12 +165,40 @@ source ~/.bashrc
 > 한 줄이라도 나오면 그 터미널은 못 씁니다. `source` 는 경로를 덧붙일 뿐
 > 지우지 않으므로 **새 터미널**을 열어야 합니다.
 
+## 빌드 (처음 한 번만)
+
+**빌드하기 전에 아래 것들을 먼저 source 해야 합니다.** 그래야 이 워크스페이스의
+`setup.bash` 하나가 나머지를 전부 끌어오게 됩니다.
+
+```bash
+source /opt/ros/humble/setup.bash
+source ~/moveit_py_ws/install/local_setup.bash
+source ~/ros2_ws/install/local_setup.bash
+
+cd ~/doosan_voice_ws
+colcon build --symlink-install
+```
+
+> `setup.bash` 가 아니라 **`local_setup.bash`** 를 쓰는 이유:
+> `setup.bash` 는 그 워크스페이스가 예전에 딸고 있던 것까지 함께 끌어옵니다.
+> 옛 MoveIt 워크스페이스가 섞여 들어오는 것을 막으려고 `local_setup.bash` 를 씁니다.
+
+빌드가 끝나면 이제부터는 이 한 줄이면 됩니다.
+
+```bash
+source ~/doosan_voice_ws/install/setup.bash
+```
+
+잘 잡혔는지 확인
+
+```bash
+ros2 pkg executables voice_robot_control     # 노드 8개 + position_viewer 가 보여야 정상
+```
+
 ## 빠르게 해 보기
 
 ```bash
-cd ~/doosan_voice_ws
-colcon build --symlink-install
-source install/setup.bash
+source ~/doosan_voice_ws/install/setup.bash
 
 # 터미널 1 — 로봇 (시뮬레이터)
 ros2 launch dsr_bringup2 dsr_bringup2_moveit.launch.py mode:=virtual model:=m0609
@@ -156,10 +254,24 @@ python3 src/voice_robot_control/voice_robot_control/nlp_node.py "안녕"
 ## 필요한 환경
 
 - Ubuntu 22.04 / ROS 2 Humble
-- MoveIt 2 (`sudo apt install ros-humble-moveit`) + `moveit_py`
+- MoveIt 2 + `moveit_py` — [처음 설치하는 컴퓨터에서](#처음-설치하는-컴퓨터에서) 참고
 - [doosan-robot2](https://github.com/doosan-robotics/doosan-robot2) (M0609)
 - OnRobot RG2 그리퍼 (없어도 시늉 모드로 실습 가능)
-- `pip install SpeechRecognition pyaudio gtts pygame "pymodbus==2.5.3"`
+- 인터넷 (⑥ 음성 인식이 구글 서버를 씁니다)
+
+## 자주 막히는 곳
+
+| 화면에 뜨는 말 | 무엇을 할까 |
+|---|---|
+| `No module named 'moveit_configs_utils'` | `sudo apt install ros-humble-moveit` |
+| `No module named 'moveit'` / `MoveItPy` 없음 | `moveit_py` 를 안 빌드했습니다 → [2번](#2-moveit_py-소스-빌드-약-2분) |
+| `libgeometric_shapes.so...: cannot open` | 옛 MoveIt 워크스페이스가 섞였습니다. 새 터미널을 여세요 |
+| `Package 'dsr_moveit_config_m0609' not found` | 두산 패키지가 없습니다 → [3번](#3-두산-로봇-패키지) |
+| `No module named 'speech_recognition'` | `pip install SpeechRecognition pyaudio` |
+| 그리퍼가 안 움직임 | `pip install "pymodbus==2.5.3"` (3.x 는 안 됩니다) |
+
+더 자세한 문제 해결은
+[`src/voice_robot_control/README.md`](src/voice_robot_control/README.md) 에 있습니다.
 
 ## 라이선스
 
