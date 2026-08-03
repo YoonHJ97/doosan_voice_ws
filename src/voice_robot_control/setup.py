@@ -27,6 +27,7 @@ setup(
         'console_scripts': [
             # ① 단순 이동  ② 여러 지점  ③ 그리퍼  ④ 집어서 옮기기  ⑤ 기어 조립
             'move_node          = voice_robot_control.move_node:main',
+            'joint_move_node    = voice_robot_control.joint_move_node:main',
             'waypoint_node      = voice_robot_control.waypoint_node:main',
             'gripper_node       = voice_robot_control.gripper_node:main',
             'pick_place_node    = voice_robot_control.pick_place_node:main',
@@ -37,6 +38,8 @@ setup(
             'nlp_node           = voice_robot_control.nlp_node:main',
             # ⑧ 명령을 받아 실제로 로봇을 움직임
             'voice_robot_node   = voice_robot_control.voice_robot_node:main',
+            # ⑨ 팀 프로젝트 — 말로 주문받아 가져다 주기
+            'order_node         = voice_robot_control.order_node:main',
             # 손끝 위치 보기 (로봇을 움직이지 않음)
             'position_viewer    = voice_robot_control.position_viewer:main',
         ],

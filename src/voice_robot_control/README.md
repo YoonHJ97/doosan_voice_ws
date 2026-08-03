@@ -3,11 +3,12 @@
 특강 **Module-5 / 6 / 7** 용 패키지입니다. `dsr_practice` 의 코드를 바탕으로,
 수업에서 바로 고쳐 쓸 수 있게 다시 정리했습니다.
 
-## 노드 8개 + 1개
+## 노드 9개 + 1개
 
 | 노드 | 하는 일 | 로봇 팔 | 그리퍼 |
 |------|---------|:---:|:---:|
 | ① `move_node` | 홈으로 갔다가 좌표 한 곳으로 이동 | ○ | — |
+| ①-2 `joint_move_node` | 관절 각도를 직접 정해서 이동 | ○ | — |
 | ② `waypoint_node` | 여러 지점을 순서대로 지나가기 | ○ | — |
 | ③ `gripper_node` | 집게만 열고 닫기 | — | ○ |
 | ④ `pick_place_node` | 물건 하나를 집어서 옮기기 | ○ | ○ |
@@ -15,6 +16,7 @@
 | ⑥ `stt_node` | 말을 알아듣고 글자로 바꾸기 | — | — |
 | ⑦ `nlp_node` | 글자를 로봇 명령으로 바꾸기 | — | — |
 | ⑧ `voice_robot_node` | **명령을 받아 실제로 로봇을 움직이기** | ○ | ○ |
+| ⑨ `order_node` | **팀 프로젝트 — 말로 물어보고 시킨 작업 하기** | ○ | ○ |
 | `position_viewer` | 손끝이 지금 어디 있는지 보여주기 | — | — |
 
 **①→②→③→④→⑤ 순서로 배웁니다.**
@@ -24,6 +26,9 @@
 ```
 마이크 → ⑥ stt_node → /stt_result → ⑦ nlp_node → /robot_command → ⑧ voice_robot_node → 로봇
 ```
+
+⑨ 는 **팀 프로젝트용**입니다. 위 셋을 나눠 켤 필요 없이 **혼자서 말하고 듣고
+움직입니다.** 노드 하나만 켜면 되고, 코드는 블록을 쌓듯 한 줄씩 내려갑니다.
 
 ---
 
@@ -66,7 +71,8 @@ ros2 launch dsr_bringup2 dsr_bringup2_moveit.launch.py \
 **터미널 2 — 하고 싶은 것 하나 고르기**
 
 ```bash
-ros2 launch voice_robot_control move.launch.py       # ① 단순 이동
+ros2 launch voice_robot_control move.launch.py       # ① 단순 이동 (좌표)
+ros2 launch voice_robot_control joint_move.launch.py # ①-2 관절 이동 (각도)
 ros2 launch voice_robot_control waypoint.launch.py   # ② 여러 지점
 ros2 launch voice_robot_control gripper.launch.py    # ③ 그리퍼만
 ros2 launch voice_robot_control pick_place.launch.py # ④ 집어서 옮기기
@@ -75,11 +81,13 @@ ros2 launch voice_robot_control stt.launch.py        # ⑥ 음성 인식
 ros2 launch voice_robot_control nlp.launch.py        # ⑦ 말 → 명령
 ros2 launch voice_robot_control voice_robot.launch.py # ⑧ 명령 → 로봇 동작
 ros2 launch voice_robot_control voice.launch.py      # ⑥⑦⑧ 한 번에
+ros2 launch voice_robot_control order.launch.py      # ⑨ 말로 시키는 로봇 (팀 프로젝트)
 ros2 launch voice_robot_control viewer.launch.py     # 손끝 위치 보기
 ```
 
 ①~⑤ 는 한 번에 **하나만** 켜고, 할 일을 다 하면 스스로 끝납니다.
 ⑥⑦⑧ 은 계속 켜 두는 노드라 **셋을 각각 다른 터미널에서 동시에** 켭니다. Ctrl+C 로 끕니다.
+⑨ 는 혼자서 다 하므로 **터미널 하나**면 됩니다.
 
 ### 말로 로봇 움직이기 (터미널 2개)
 
@@ -119,6 +127,21 @@ ros2 launch voice_robot_control stt.launch.py           # 6
 TARGET = {"x": 0.500, "y": 0.000, "z": 0.500}   # 어디로 갈까? [m]
 SPEED = 0.15                                     # 얼마나 빠르게? (작을수록 느림)
 ```
+
+### ①-2 `joint_move_node.py`
+
+좌표 대신 **관절 각도(도)** 를 직접 정합니다. 팔이 항상 같은 모양으로 움직입니다.
+
+```python
+TARGET = {                          # 어떤 자세로 갈까? 단위는 도(°)
+    "joint_1": 30.0, "joint_2": 20.0, "joint_3": 70.0,
+    "joint_4":  0.0, "joint_5": 90.0, "joint_6":  0.0,
+}                                   # 안 적은 관절은 홈 값이 됩니다
+SPEED = 0.15                        # 얼마나 빠르게?
+```
+
+> 지금 관절이 몇 도인지는 `ros2 topic echo /joint_states` 로 봅니다.
+> 라디안으로 나오니 도로 바꾸려면 ×57.3 하세요.
 
 ### ② `waypoint_node.py`
 
@@ -381,6 +404,142 @@ ros2 topic pub --once /robot_command std_msgs/msg/String "data: 'pick 2'"
 > **`stop` 은 기다리던 명령만 취소합니다.** 이미 시작한 동작은 끝까지 갑니다.
 > 급할 때는 **비상정지 버튼**을 누르세요.
 
+### ⑨ `order_node.py` — 팀 프로젝트
+
+**말로 물어보고, 듣고, 시킨 작업을 하는 로봇**입니다.
+
+```bash
+# 터미널 1 — 로봇
+ros2 launch dsr_bringup2 dsr_bringup2_moveit.launch.py mode:=virtual model:=m0609
+# 터미널 2 — 말로 시키기
+ros2 launch voice_robot_control order.launch.py
+```
+
+```
+🔊 로봇 : "어떤 동작을 원하시나요? 콜라, 사이다 중에 골라 주세요."
+🎤 사람 : "콜라"
+      → if 문이 '콜라' 를 골라내고 → 작업1_하기() 가 실행됩니다
+🔊 로봇 : "콜라 끝났습니다."
+      → 다시 처음으로
+
+끝낼 때는 "그만" 이라고 말하거나 Ctrl+C
+```
+
+**맨 위에서 고칠 것은 작업 이름과 좌표뿐입니다.**
+
+```python
+# 1. 무슨 말을 들으면 어떤 작업을 할까요?
+#    "콜라", "1번", "왼쪽" 처럼 아무 말이나 넣어도 됩니다
+작업1_이름 = "콜라"
+작업2_이름 = "사이다"
+
+# 2. 좌표 [m]
+#    작업 1 에서 쓰는 자리
+좌표1 = {"x": 0.393, "y":  0.094, "z": 0.330}    # 집을 물건 위
+좌표2 = {"x": 0.393, "y":  0.094, "z": 0.280}    # 집을 물건
+좌표3 = {"x": 0.393, "y": -0.206, "z": 0.330}    # 놓을 자리 위
+좌표4 = {"x": 0.393, "y": -0.206, "z": 0.280}    # 놓을 자리
+
+#    작업 2 에서 쓰는 자리
+좌표5 = {"x": 0.392, "y":  0.200, "z": 0.330}
+좌표6 = {"x": 0.392, "y":  0.200, "z": 0.280}
+좌표7 = {"x": 0.392, "y": -0.101, "z": 0.330}
+좌표8 = {"x": 0.392, "y": -0.101, "z": 0.280}
+```
+
+> **왜 자리를 두 개씩 적나요?** 물건 바로 위(`좌표1`)를 한 번 들렀다가
+> 내려가야(`좌표2`) 옆에서 부딪히지 않습니다. `x`, `y` 는 같고 `z` 만 다릅니다.
+
+**작업마다 자기 블록이 따로 있습니다.** 작업 1 과 작업 2 를 아주 다른 동작으로
+만들어도 됩니다. 줄을 지우거나, 순서를 바꾸거나, 새 줄을 끼워 넣으면 그대로 바뀝니다.
+`time.sleep` 의 숫자도 직접 고칩니다 (로봇이 흔들리면 늘리고, 느리면 줄이세요).
+
+```python
+def 작업1_하기():
+    말하기(f"{작업1_이름} 시작하겠습니다. 잠시만 기다려 주세요.")
+
+    그리퍼_열기()          # 집게를 열고
+    time.sleep(1.0)
+
+    이동(좌표1)            # 물건 위로 가서
+    time.sleep(1.0)
+
+    이동(좌표2)            # 내려가서
+    time.sleep(1.0)
+
+    그리퍼_닫기()          # 잡고
+    time.sleep(1.0)
+
+    이동(좌표1)            # 들어 올리고
+    time.sleep(1.0)
+
+    이동(좌표3)            # 놓을 자리 위로 옮기고
+    time.sleep(1.0)
+
+    이동(좌표4)            # 내려가서
+    time.sleep(1.0)
+
+    그리퍼_열기()          # 놓고
+    time.sleep(1.0)
+
+    이동(좌표3)            # 빠져나오고
+    time.sleep(1.0)
+
+    홈으로()               # 제자리로
+
+    말하기(f"{작업1_이름} 끝났습니다.")
+
+
+def 작업2_하기():
+    ...                    # 좌표5~8 을 쓰는 블록. 완전히 다른 동작이어도 됩니다
+```
+
+고른 작업을 부르는 곳은 이 `if` 문 하나입니다.
+
+```python
+if 그만_할_때 in 손님_말:
+    말하기(끝인사)
+    return False
+
+elif 작업1_이름 in 손님_말:
+    작업1_하기()          # ← 작업 1 의 블록이 실행됩니다
+
+elif 작업2_이름 in 손님_말:
+    작업2_하기()          # ← 작업 2 의 블록이 실행됩니다
+
+else:
+    말하기(못_알아들었을_때)
+```
+
+쓸 수 있는 블록은 이게 전부입니다 (`blocks.py` 에 들어 있습니다).
+
+| 블록 | 하는 일 |
+|---|---|
+| `말하기("안녕하세요")` | 스피커로 말한다 |
+| `듣기()` | 마이크로 듣고 글자로 돌려준다 |
+| `홈으로()` | 홈 자세로 간다 |
+| `이동(좌표1)` | 그 좌표로 간다 |
+| `그리퍼_열기()` / `그리퍼_닫기()` | 집게를 열고 닫는다 |
+| `time.sleep(1.0)` | 1초 쉰다 |
+
+**로봇·마이크 없이 자리에서 연습하기** — 파일 맨 위의 스위치를 내리세요.
+
+```python
+로봇_사용 = False      # 팔을 안 움직이고 화면에만 찍습니다
+마이크_사용 = False    # 마이크 대신 /stt_result 를 기다립니다
+```
+
+```bash
+ros2 run voice_robot_control order_node
+# 다른 터미널에서 말 대신 시키기
+ros2 topic pub --once /stt_result std_msgs/msg/String "data: '콜라'"
+```
+
+> **작업을 늘리려면** 세 가지를 하면 됩니다.
+> 1. `작업3_이름` 과 쓸 좌표(`좌표9`, `좌표10` ...)를 맨 위에 추가
+> 2. `def 작업3_하기():` 를 만들고 블록을 쌓기 (작업2 를 복사해서 고치면 쉽습니다)
+> 3. `if` 문에 `elif 작업3_이름 in 손님_말: 작업3_하기()` 한 덩이 추가
+
 ---
 
 ## 4. 좌표를 모를 때
@@ -435,6 +594,8 @@ ros2 topic pub --once /record_pose std_msgs/msg/String "data: '내자리'"
 | `구글 음성 인식 서버에 연결하지 못했습니다` | 인터넷 연결을 확인하세요 (⑥ 은 인터넷이 필요합니다) |
 | 소음까지 계속 알아들음 | `ENERGY_THRESHOLD` 를 올리세요 (이 컴퓨터는 4000~5500 정도) |
 | `아는 낱말이 하나도 없습니다` | `keyword_map.yaml` 에 그 말을 추가하고 ⑦ 을 다시 켜세요 |
+| `소리를 낼 수 없어 글자로만 보여줍니다` | ⑨ 의 TTS 입니다. `pip install gtts pygame` 후 다시 켜세요 |
+| ⑨ 가 `/stt_result 를 기다립니다` | 마이크를 못 열었습니다. 다른 터미널에서 `ros2 topic pub` 로 시키거나 마이크를 확인하세요 |
 | `몇 번인지 말해주세요` | "기어 2번 집어" 처럼 번호를 넣거나 "전체" 라고 하세요 |
 
 ---
@@ -443,7 +604,8 @@ ros2 topic pub --once /record_pose std_msgs/msg/String "data: '내자리'"
 
 ```
 voice_robot_control/
-├── move_node.py            ① 단순 이동
+├── move_node.py            ① 단순 이동 (좌표)
+├── joint_move_node.py      ①-2 관절 이동 (각도)
 ├── waypoint_node.py        ② 여러 지점
 ├── gripper_node.py         ③ 그리퍼
 ├── pick_place_node.py      ④ 집어서 옮기기
@@ -451,8 +613,10 @@ voice_robot_control/
 ├── stt_node.py             ⑥ 음성 인식
 ├── nlp_node.py             ⑦ 말 → 로봇 명령
 ├── voice_robot_node.py     ⑧ 명령 → 로봇 동작
+├── order_node.py           ⑨ 말로 시키는 로봇 (팀 프로젝트, 학생이 고치는 파일)
 ├── position_viewer.py      손끝 위치 보기
 │
+├── blocks.py               ⑨ 가 쓰는 블록 (말하기/듣기/이동/그리퍼)
 ├── robot_common.py         여러 노드가 함께 쓰는 부분
 │                           (홈 자세, 안전 영역, 경로 계획+실행)
 ├── gripper_control.py      그리퍼 연결 (실물 없으면 시늉)

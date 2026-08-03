@@ -21,10 +21,12 @@ ROS 2를 처음 접하는 학생이 **YAML 파일만 고쳐서** 로봇을 다�
 | ⑥ | `stt_node` | 말을 알아듣고 글자로 | — |
 | ⑦ | `nlp_node` | 글자를 로봇 명령으로 | — |
 | ⑧ | `voice_robot_node` | 명령을 받아 실제로 움직이기 | ○ |
+| ⑨ | `order_node` | **팀 프로젝트** — 말로 물어보고 시킨 작업 하기 | ○ |
 | | `position_viewer` | 손끝 위치 보기 | — |
 
 난이도 순서대로 배우도록 되어 있습니다. ①~⑤는 코드를 읽고 고치는 실습,
 ⑥~⑧은 함께 켜서 말로 로봇을 움직이는 통합 실습입니다.
+⑨는 팀 프로젝트용으로, 노드 하나가 말하고 듣고 움직이는 것을 다 합니다.
 
 ## 처음 설치하는 컴퓨터에서
 
@@ -87,9 +89,22 @@ colcon build
 ### 4. 파이썬 라이브러리
 
 ```bash
-sudo apt install portaudio19-dev
+sudo apt update
+sudo apt install -y portaudio19-dev python3-dev
 pip install SpeechRecognition pyaudio gtts pygame "pymodbus==2.5.3"
 ```
+
+`pyaudio` 는 설치할 때 소스에서 컴파일됩니다. **먼저 `portaudio19-dev` 와
+`python3-dev` 를 apt 로 깔아야** 합니다. 안 그러면 아래처럼 실패합니다.
+
+```
+fatal error: portaudio.h: No such file or directory
+ERROR: Could not build wheels for pyaudio
+```
+
+이 상태로 `ros2 launch voice_robot_control stt.launch.py` 를 실행하면
+`speech_recognition 이 없습니다` 하고 노드가 죽습니다.
+apt 로 두 패키지를 깐 뒤 `pip install` 을 다시 하면 됩니다.
 
 `pymodbus` 는 **2.5.3** 이어야 합니다 (3.x 는 API 가 달라 그리퍼가 안 됩니다).
 
@@ -205,7 +220,7 @@ source ~/doosan_voice_ws/install/setup.bash
 잘 잡혔는지 확인
 
 ```bash
-ros2 pkg executables voice_robot_control     # 노드 8개 + position_viewer 가 보여야 정상
+ros2 pkg executables voice_robot_control     # 노드 9개 + position_viewer 가 보여야 정상
 ```
 
 ## 빠르게 해 보기
@@ -226,6 +241,59 @@ ros2 launch voice_robot_control voice.launch.py
 ros2 launch voice_robot_control voice.launch.py use_stt:=false
 ros2 topic pub --once /stt_result std_msgs/msg/String "data: '기어 2번 집어'"
 ```
+
+## 팀 프로젝트 — 말로 시키는 로봇 (⑨)
+
+물어보고, 듣고, 시킨 작업을 하는 로봇입니다. **터미널 하나**면 됩니다.
+
+```bash
+# 터미널 1 — 로봇 (시뮬레이터)
+ros2 launch dsr_bringup2 dsr_bringup2_moveit.launch.py mode:=virtual model:=m0609
+
+# 터미널 2 — 말로 시키기
+ros2 launch voice_robot_control order.launch.py
+```
+
+```
+🔊 "어떤 동작을 원하시나요? 콜라, 사이다 중에 골라 주세요."
+🎤 "콜라"                 → if 문이 골라내고 → 작업1_하기() 가 실행됩니다
+🔊 "콜라 끝났습니다."
+```
+
+고치는 곳은 `voice_robot_control/order_node.py` 맨 위의 **작업 이름과 좌표**입니다.
+
+```python
+작업1_이름 = "콜라"                                # 이 말을 들으면 작업 1
+작업2_이름 = "사이다"
+
+좌표1 = {"x": 0.393, "y":  0.094, "z": 0.330}     # 집을 물건 위
+좌표2 = {"x": 0.393, "y":  0.094, "z": 0.280}     # 집을 물건
+좌표3 = {"x": 0.393, "y": -0.206, "z": 0.330}     # 놓을 자리 위
+좌표4 = {"x": 0.393, "y": -0.206, "z": 0.280}     # 놓을 자리
+```
+
+**작업마다 자기 블록이 따로 있어서**, 작업 1 과 작업 2 를 아주 다른 동작으로
+만들 수 있습니다. 블록은 한 줄씩 쌓듯 내려갑니다.
+
+```python
+def 작업1_하기():
+    그리퍼_열기()          # 집게를 열고
+    time.sleep(1.0)
+
+    이동(좌표1)            # 물건 위로 가서
+    time.sleep(1.0)
+
+    이동(좌표2)            # 내려가서
+    time.sleep(1.0)
+
+    그리퍼_닫기()          # 잡고
+    time.sleep(1.0)
+    ...
+```
+
+로봇이나 마이크가 없어도 연습할 수 있습니다 (파일 맨 위 `로봇_사용 = False`,
+`마이크_사용 = False`). 자세한 설명은
+[패키지 README 의 ⑨ 항목](src/voice_robot_control/README.md#-order_nodepy--팀-프로젝트) 에 있습니다.
 
 ## 학생이 고치는 파일
 
@@ -270,7 +338,8 @@ python3 src/voice_robot_control/voice_robot_control/nlp_node.py "안녕"
 - MoveIt 2 + `moveit_py` — [처음 설치하는 컴퓨터에서](#처음-설치하는-컴퓨터에서) 참고
 - [doosan-robot2](https://github.com/doosan-robotics/doosan-robot2) (M0609)
 - OnRobot RG2 그리퍼 (없어도 시늉 모드로 실습 가능)
-- 인터넷 (⑥ 음성 인식이 구글 서버를 씁니다)
+- 인터넷 (⑥ 음성 인식, ⑨ 말하기가 구글 서버를 씁니다)
+- 스피커 (⑨ 가 말합니다. 없으면 화면에 글자로만 나옵니다)
 
 ## 자주 막히는 곳
 
@@ -281,7 +350,8 @@ python3 src/voice_robot_control/voice_robot_control/nlp_node.py "안녕"
 | `libgeometric_shapes.so...: cannot open` | apt MoveIt 과 소스 MoveIt 이 섞였습니다. 새 터미널에서 하나만 source |
 | `dsr.srdf.xacro doesn't exist` | 오래된 버전입니다. `git pull` 후 다시 빌드하세요 |
 | `Package 'dsr_moveit_config_m0609' not found` | 두산 패키지가 없습니다 → [3번](#3-두산-로봇-패키지) |
-| `No module named 'speech_recognition'` | `pip install SpeechRecognition pyaudio` |
+| `No module named 'speech_recognition'` | `sudo apt install -y portaudio19-dev python3-dev` 후 `pip install SpeechRecognition pyaudio` |
+| `fatal error: portaudio.h` / `Could not build wheels for pyaudio` | apt 로 `portaudio19-dev python3-dev` 를 먼저 깔고 다시 `pip install` |
 | 그리퍼가 안 움직임 | `pip install "pymodbus==2.5.3"` (3.x 는 안 됩니다) |
 
 더 자세한 문제 해결은

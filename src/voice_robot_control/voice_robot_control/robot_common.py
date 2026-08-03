@@ -195,14 +195,47 @@ def make_plan_params(robot, vel_home=0.2, vel_move=0.15, acc=0.1, plan_time=2.0)
     return home_params, pilz_params
 
 
+def make_joint_state(robot, joints_deg, logger=None):
+    """
+    관절 각도[도] 로 RobotState 를 만든다.
+
+      joints_deg : {"joint_1": 0.0, "joint_2": ...}  — 단위는 도(°)
+
+    여섯 개를 다 적지 않아도 된다. 빠진 관절은 홈 자세 값으로 채운다.
+    (RobotState 는 안 적은 관절을 0도로 두기 때문에, 그대로 두면
+     생각지도 못한 자세로 팔이 움직인다.)
+    """
+    angles = dict(HOME_JOINTS_DEG)
+
+    for name, deg in joints_deg.items():
+        if name not in angles:
+            if logger is not None:
+                logger.warning(f"'{name}' 은(는) 없는 관절 이름입니다. 무시합니다.")
+            continue
+        angles[name] = float(deg)
+
+    missing = [n for n in HOME_JOINTS_DEG if n not in joints_deg]
+    if missing and logger is not None:
+        logger.info(f"적지 않은 관절은 홈 값으로 둡니다: {', '.join(missing)}")
+
+    state = RobotState(robot.get_robot_model())
+    state.joint_positions = {
+        name: math.radians(deg) for name, deg in angles.items()
+    }
+    state.update()
+    return state
+
+
 def make_home_state(robot):
     """홈 자세를 나타내는 RobotState 를 만든다."""
-    home_state = RobotState(robot.get_robot_model())
-    home_state.joint_positions = {
-        name: math.radians(deg) for name, deg in HOME_JOINTS_DEG.items()
-    }
-    home_state.update()
-    return home_state
+    return make_joint_state(robot, HOME_JOINTS_DEG)
+
+
+def move_to_joints(robot, arm, logger, joint_state, plan_parameters):
+    """관절 자세(RobotState) 하나로 이동한다."""
+    arm.set_start_state_to_current_state()
+    arm.set_goal_state(robot_state=joint_state)
+    return plan_and_execute(robot, arm, logger, plan_parameters=plan_parameters)
 
 
 def go_home(robot, arm, logger, home_state, home_params):
