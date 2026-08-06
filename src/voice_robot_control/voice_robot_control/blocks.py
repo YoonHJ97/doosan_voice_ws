@@ -37,13 +37,15 @@ from rclpy.logging import get_logger
 from std_msgs.msg import String
 
 from .gripper_control import connect_gripper, is_gripping, wait_until_done
+# 손목 각도 다루기. 순수 계산이라 MoveIt 이 없어도 불러올 수 있다.
+from .pose_utils import wrap_deg
 
 # 로봇 팔을 움직이는 부분은 MoveIt 이 필요하다.
 # MoveIt 이 없는 컴퓨터에서도 '말하고 듣기' 는 연습할 수 있도록,
 # 없으면 없는 대로 넘어가고 로봇을 쓰려 할 때만 알려준다.
 try:
     from .robot_common import (
-        DOWN, finish, go_home, make_home_state, make_plan_params, make_pose,
+        finish, go_home, make_home_state, make_plan_params, make_pose,
         plan_and_execute, setup_robot,
     )
     _무브잇있음 = True
@@ -92,6 +94,7 @@ _마이크 = None
 _우편함 = []             # /stt_result 로 들어온 말을 담아 두는 곳
 
 _스피커켜짐 = False
+_스피커_해봤나 = False   # 준비() 없이 말하기() 만 불렀을 때 한 번만 켜 보려고
 
 
 # ══════════════════════════════════════════════════════════
@@ -147,7 +150,8 @@ def 준비(로봇=True, 마이크=True):
 # ══════════════════════════════════════════════════════════
 def _스피커_준비():
     """gTTS + pygame 을 켠다. 안 되면 글자로만 보여준다."""
-    global _스피커켜짐
+    global _스피커켜짐, _스피커_해봤나
+    _스피커_해봤나 = True
     try:
         import pygame
         from gtts import gTTS      # noqa: F401  (있는지만 확인)
@@ -183,11 +187,27 @@ def _소리파일(문장: str) -> str:
     return 경로
 
 
-def 말하기(문장: str) -> bool:
-    """스피커로 말한다. 화면에도 같이 찍는다."""
+def 말하기(*내용, sep=" ") -> bool:
+    """
+    스피커로 말한다. print 처럼 쓰면 된다. 화면에도 같이 찍힌다.
+
+      말하기("안녕하세요")
+      말하기("콜라", "가져다 드릴게요")     ← 여러 개를 주면 띄어쓰기로 이어 붙인다
+      말하기("남은 개수는", 3, "개입니다")  ← 숫자를 그냥 넣어도 된다
+      말하기("가", "나", "다", sep="")      ← 붙여서 말하고 싶으면
+    """
+    global _로그
+    문장 = sep.join(str(x) for x in 내용)
+
+    # 준비() 를 안 부르고 말하기() 부터 써도 되게 한다.
+    if _로그 is None:
+        _로그 = get_logger("order_node")
+    if not _스피커_해봤나:
+        _스피커_준비()
+
     _로그.info(f'[말] "{문장}"')
 
-    if not _스피커켜짐:
+    if not _스피커켜짐 or not 문장:
         return False
 
     try:
@@ -329,17 +349,23 @@ def 이동(자리: dict, 위로: float = 0.0) -> bool:
 
       이동(콜라_자리)              그 자리로
       이동(콜라_자리, 위로=0.05)   그 자리의 5cm 위로
+
+    자리에 "degree" 를 적어 두면 손목을 그만큼 돌린 채로 간다.
+
+      {"x": 0.4, "y": 0.1, "z": 0.3}               손목 그대로
+      {"x": 0.4, "y": 0.1, "z": 0.3, "degree": 90} 손목을 90도 돌려서
     """
     if not _로봇켜짐:
         _로그.info(
             f"[시늉] 이동 → x {자리['x']:.3f}  y {자리['y']:.3f}  "
-            f"z {자리['z'] + 위로:.3f}")
+            f"z {자리['z'] + 위로:.3f}  손목 {wrap_deg(자리.get('degree', 0.0)):g}도")
         time.sleep(0.5)
         return True
 
+    # 손목 각도(degree)는 make_pose 가 알아서 읽어 쓴다.
     성공 = plan_and_execute(
         _로봇, _팔, _로그,
-        pose_goal=make_pose(자리, DOWN, 위로),
+        pose_goal=make_pose(자리, z_offset=위로),
         plan_parameters=_이동계획)
 
     if not 성공:

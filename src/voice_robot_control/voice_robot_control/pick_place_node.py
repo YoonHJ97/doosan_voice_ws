@@ -27,6 +27,7 @@ pick_place_node.py — ④ 집어서 옮기기 노드  [Module-5]
 
 ■ 실습
   · PICK / PLACE 좌표를 바꿔 다른 자리에서 집고 놓아 보세요.
+  · degree 를 바꿔 집게를 비스듬히 돌려서 집어 보세요.
   · APPROACH_OFFSET 을 바꿔 얼마나 높은 데서 접근할지 조절해 보세요.
   · 물건을 치우고 실행하면 '못 잡았다' 는 경고가 뜹니다.
 """
@@ -36,7 +37,7 @@ from rclpy.logging import get_logger
 
 from .gripper_control import connect_gripper, is_gripping, wait_until_done
 from .robot_common import (
-    DOWN, finish, go_home, make_home_state, make_plan_params, make_pose,
+    finish, go_home, make_home_state, make_plan_params, make_pose,
     plan_and_execute, setup_robot,
 )
 
@@ -46,10 +47,18 @@ from .robot_common import (
 # ══════════════════════════════════════════════════════════
 
 # 어디서 집을까?  (base_link 기준, 단위 m)
-PICK = {"x": 0.427, "y": 0.148, "z": 0.280}
+#
+#   권장 범위   x      :  0.30 ~ 0.60    앞으로 나간 거리
+#               y      : -0.30 ~ 0.30    왼쪽(+) / 오른쪽(-)
+#               z      :  0.27 ~ 0.60    높이
+#               degree : -180 ~ 180      집게를 돌리는 각도 [도]
+#   x < 0, |y| > 0.3, z < 0.27 은 자동으로 잘리고 경고가 뜹니다.
+#   degree 는 물건이 비스듬히 놓여 있을 때 씁니다. 안 적으면 0 입니다.
+#   너무 멀면(팔 길이 0.9m) 범위 안이어도 "계획 실패" 가 뜹니다.
+PICK = {"x": 0.427, "y": 0.148, "z": 0.280, "degree": 0}
 
 # 어디에 놓을까?
-PLACE = {"x": 0.426, "y": -0.153, "z": 0.280}
+PLACE = {"x": 0.426, "y": -0.153, "z": 0.280, "degree": 0}
 
 # 집기/놓기 전에 위에서 접근하는 높이 [m]
 APPROACH_OFFSET = 0.05
@@ -105,13 +114,13 @@ def main(args=None):
 
     logger.info("  · 집는 자리 위로")
     if not plan_and_execute(robot, arm, logger,
-                            pose_goal=make_pose(PICK, DOWN, APPROACH_OFFSET),
+                            pose_goal=make_pose(PICK, z_offset=APPROACH_OFFSET),
                             plan_parameters=pilz_params):
         return stop_here("집는 자리 위로")
 
     logger.info("  · 집는 자리로 내려가기")
     if not plan_and_execute(robot, arm, logger,
-                            pose_goal=make_pose(PICK, DOWN),
+                            pose_goal=make_pose(PICK),
                             plan_parameters=pilz_params):
         return stop_here("집는 자리로 내려가기")
 
@@ -134,7 +143,7 @@ def main(args=None):
 
     logger.info("  · 들어 올리기")
     if not plan_and_execute(robot, arm, logger,
-                            pose_goal=make_pose(PICK, DOWN, APPROACH_OFFSET),
+                            pose_goal=make_pose(PICK, z_offset=APPROACH_OFFSET),
                             plan_parameters=pilz_params):
         return stop_here("들어 올리기")
 
@@ -145,13 +154,13 @@ def main(args=None):
 
     logger.info("  · 놓는 자리 위로")
     if not plan_and_execute(robot, arm, logger,
-                            pose_goal=make_pose(PLACE, DOWN, APPROACH_OFFSET),
+                            pose_goal=make_pose(PLACE, z_offset=APPROACH_OFFSET),
                             plan_parameters=pilz_params):
         return stop_here("놓는 자리 위로")
 
     logger.info("  · 놓는 자리로 내려가기")
     if not plan_and_execute(robot, arm, logger,
-                            pose_goal=make_pose(PLACE, DOWN),
+                            pose_goal=make_pose(PLACE),
                             plan_parameters=pilz_params):
         return stop_here("놓는 자리로 내려가기")
 
@@ -161,7 +170,7 @@ def main(args=None):
 
     logger.info("  · 빠져나오기")
     if not plan_and_execute(robot, arm, logger,
-                            pose_goal=make_pose(PLACE, DOWN, APPROACH_OFFSET),
+                            pose_goal=make_pose(PLACE, z_offset=APPROACH_OFFSET),
                             plan_parameters=pilz_params):
         return stop_here("빠져나오기")
 

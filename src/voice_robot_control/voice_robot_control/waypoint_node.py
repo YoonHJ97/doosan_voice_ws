@@ -11,14 +11,15 @@ waypoint_node.py — ② 여러 지점 지나가기 노드  [Module-5]
   · WAYPOINTS 에 줄을 더 넣으면 지나가는 지점이 늘어납니다.
   · 순서를 바꾸면 지나가는 순서가 바뀝니다.
   · REPEAT 를 2로 바꾸면 같은 길을 두 번 돕니다.
+  · degree 를 넣으면 지나가면서 손목을 돌립니다.
 """
 
 import rclpy
 from rclpy.logging import get_logger
 
 from .robot_common import (
-    finish, go_home, make_home_state, make_plan_params, make_pose,
-    plan_and_execute, setup_robot,
+    describe_pos, finish, go_home, make_home_state, make_plan_params,
+    make_pose, plan_and_execute, setup_robot,
 )
 
 
@@ -28,10 +29,18 @@ from .robot_common import (
 
 # 지나갈 지점들 (base_link 기준, 단위 m)
 # 위에서부터 순서대로 지나갑니다.
+#
+#   권장 범위   x      :  0.30 ~ 0.60    앞으로 나간 거리
+#               y      : -0.30 ~ 0.30    왼쪽(+) / 오른쪽(-)
+#               z      :  0.27 ~ 0.60    높이
+#               degree : -180 ~ 180      손목을 돌리는 각도 [도]
+#   x < 0, |y| > 0.3, z < 0.27 은 자동으로 잘리고 경고가 뜹니다.
+#   degree 는 안 적으면 0 (지금까지와 같음) 으로 봅니다.
+#   너무 멀면(팔 길이 0.9m) 범위 안이어도 "계획 실패" 가 뜹니다.
 WAYPOINTS = [
     {"x": 0.493, "y":  0.010, "z": 0.417},
-    {"x": 0.493, "y": -0.218, "z": 0.417},
-    {"x": 0.371, "y": -0.218, "z": 0.419},
+    {"x": 0.493, "y": -0.218, "z": 0.417, "degree": 45},
+    {"x": 0.371, "y": -0.218, "z": 0.419, "degree": 90},
     {"x": 0.371, "y":  0.010, "z": 0.419},
 ]
 
@@ -71,9 +80,7 @@ def main(args=None):
 
         for i, point in enumerate(WAYPOINTS, start=1):
             logger.info(
-                f"--- {i}/{total} 번째 지점: "
-                f"x={point['x']:.3f}, y={point['y']:.3f}, z={point['z']:.3f} ---"
-            )
+                f"--- {i}/{total} 번째 지점: {describe_pos(point)} ---")
 
             pose_goal = make_pose(point)
             if not plan_and_execute(robot, arm, logger,

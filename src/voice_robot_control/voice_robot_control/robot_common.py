@@ -21,6 +21,8 @@ from geometry_msgs.msg import PoseStamped
 from moveit.core.robot_state import RobotState
 from moveit.planning import MoveItPy, PlanRequestParameters
 
+from .pose_utils import wrap_deg, wrist_deg_to_quat
+
 
 # ══════════════════════════════════════════════════════════
 #  로봇 이름표 — 두산 M0609
@@ -39,7 +41,20 @@ HOME_JOINTS_DEG = {
     "joint_6": 0.0,
 }
 
+# 관절이 돌 수 있는 범위 [도]
+# dsr_moveit_config_m0609/config/joint_limits.yaml 의 값을 도로 바꾼 것이다.
+# 관절 각도는 좌표와 달리 자동으로 잘리지 않는다. 벗어나면 "계획 실패" 가 뜬다.
+JOINT_RANGE_DEG = {
+    "joint_1": (-180.0, 180.0),
+    "joint_2": (-74.0, 74.0),
+    "joint_3": (-114.0, 114.0),
+    "joint_4": (-180.0, 180.0),
+    "joint_5": (-114.0, 114.0),
+    "joint_6": (-180.0, 180.0),
+}
+
 # 손끝이 바닥을 바라보는 자세 (쿼터니언 x, y, z, w)
+# = degree 0 인 손목 자세와 같다.
 DOWN = {"x": 0.0, "y": 1.0, "z": 0.0, "w": 0.0}
 
 
@@ -214,6 +229,13 @@ def make_joint_state(robot, joints_deg, logger=None):
             continue
         angles[name] = float(deg)
 
+        # 범위를 벗어나면 계획 단계에서 실패한다. 왜 실패했는지 미리 알려준다.
+        low, high = JOINT_RANGE_DEG[name]
+        if not low <= float(deg) <= high and logger is not None:
+            logger.warning(
+                f"{name} = {float(deg):g}도 는 돌 수 있는 범위"
+                f"({low:g} ~ {high:g}도) 를 벗어났습니다. 계획이 실패할 수 있습니다.")
+
     missing = [n for n in HOME_JOINTS_DEG if n not in joints_deg]
     if missing and logger is not None:
         logger.info(f"적지 않은 관절은 홈 값으로 둡니다: {', '.join(missing)}")
@@ -305,16 +327,38 @@ def finish(logger):
     os._exit(0)
 
 
+def wrist_ori(degree=0.0) -> dict:
+    """손목만 degree[도] 돌린 자세를 make_pose 에 넣을 모양으로 만든다."""
+    x, y, z, w = wrist_deg_to_quat(degree)
+    return {"x": x, "y": y, "z": z, "w": w}
+
+
+def describe_pos(pos, z_offset=0.0) -> str:
+    """좌표를 로그에 한 줄로 적는다. degree 를 적어 두었으면 그것도 같이."""
+    text = (f"x={float(pos['x']):.3f}, y={float(pos['y']):.3f}, "
+            f"z={float(pos['z']) + z_offset:.3f}")
+    degree = pos.get("degree", 0.0)
+    if degree:
+        text += f", 손목={wrap_deg(degree):g}도"
+    return text
+
+
 def make_pose(pos, ori=None, z_offset=0.0) -> PoseStamped:
     """
     좌표와 자세로 PoseStamped 를 만든다.
 
       pos      : {"x":..., "y":..., "z":...}
-      ori      : {"x":..., "y":..., "z":..., "w":...}  (생략하면 바닥 보기)
+                 "degree" 를 같이 적어 두면 손목을 그만큼 돌린 채로 간다.
+      ori      : {"x":..., "y":..., "z":..., "w":...}
+                 생략하면 pos 의 "degree" 로 정한다 (없으면 바닥 보기).
       z_offset : z 를 이만큼 더 올린다 [m]
+
+      make_pose({"x": 0.4, "y": 0.1, "z": 0.3})               손목 그대로
+      make_pose({"x": 0.4, "y": 0.1, "z": 0.3, "degree": 90}) 손목을 90도 돌려서
     """
     if ori is None:
-        ori = DOWN
+        # degree 가 없으면 wrist_ori(0) == DOWN 이라 지금까지와 똑같다.
+        ori = wrist_ori(pos.get("degree", 0.0))
 
     pose = PoseStamped()
     pose.header.frame_id = BASE_FRAME

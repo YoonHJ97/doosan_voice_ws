@@ -23,19 +23,18 @@ gear_assembly_node.py — ⑤ 기어 조립 노드  [Module-5]
 
 ■ 실습
   · GEAR_TASKS 의 좌표를 바꿔 기어 위치를 맞춰 보세요.
+  · degree 를 넣으면 집게를 그만큼 돌려서 집고 놓습니다.
   · 순서를 바꾸면 조립 순서가 바뀝니다.
   · USE_WIGGLE 을 False 로 하면 마지막에 좌우로 흔드는 동작을 건너뜁니다.
 """
-
-import math
 
 import rclpy
 from rclpy.logging import get_logger
 
 from .gripper_control import connect_gripper, is_gripping, wait_until_done
 from .robot_common import (
-    DOWN, finish, go_home, make_home_state, make_plan_params, make_pose,
-    plan_and_execute, setup_robot,
+    describe_pos, finish, go_home, make_home_state, make_plan_params,
+    make_pose, plan_and_execute, setup_robot,
 )
 
 
@@ -45,22 +44,30 @@ from .robot_common import (
 
 # 기어를 어디서 집어 어디에 놓을지 (base_link 기준, 단위 m)
 # 위에서부터 순서대로 조립합니다.
+#
+#   권장 범위   x      :  0.30 ~ 0.60    앞으로 나간 거리
+#               y      : -0.30 ~ 0.30    왼쪽(+) / 오른쪽(-)
+#               z      :  0.27 ~ 0.60    높이
+#               degree : -180 ~ 180      집게를 돌리는 각도 [도]
+#   x < 0, |y| > 0.3, z < 0.27 은 자동으로 잘리고 경고가 뜹니다.
+#   degree 는 기어가 비스듬히 놓여 있을 때 씁니다. 안 적으면 0 입니다.
+#   너무 멀면(팔 길이 0.9m) 범위 안이어도 "계획 실패" 가 뜹니다.
 GEAR_TASKS = [
     {   # 1번 기어
-        "pick":  {"x": 0.393, "y":  0.094, "z": 0.280},
-        "place": {"x": 0.393, "y": -0.206, "z": 0.280},
+        "pick":  {"x": 0.393, "y":  0.094, "z": 0.280, "degree": 0},
+        "place": {"x": 0.393, "y": -0.206, "z": 0.280, "degree": 0},
     },
     {   # 2번 기어
-        "pick":  {"x": 0.392, "y":  0.200, "z": 0.280},
-        "place": {"x": 0.392, "y": -0.101, "z": 0.280},
+        "pick":  {"x": 0.392, "y":  0.200, "z": 0.280, "degree": 0},
+        "place": {"x": 0.392, "y": -0.101, "z": 0.280, "degree": 0},
     },
     {   # 3번 기어
-        "pick":  {"x": 0.486, "y":  0.153, "z": 0.280},
-        "place": {"x": 0.486, "y": -0.149, "z": 0.280},
+        "pick":  {"x": 0.486, "y":  0.153, "z": 0.280, "degree": 0},
+        "place": {"x": 0.486, "y": -0.149, "z": 0.280, "degree": 0},
     },
     {   # 4번 기어
-        "pick":  {"x": 0.427, "y":  0.148, "z": 0.280},
-        "place": {"x": 0.426, "y": -0.153, "z": 0.280},
+        "pick":  {"x": 0.427, "y":  0.148, "z": 0.280, "degree": 0},
+        "place": {"x": 0.426, "y": -0.153, "z": 0.280, "degree": 0},
     },
 ]
 
@@ -89,78 +96,61 @@ SPEED = 0.15
 # ══════════════════════════════════════════════════════════
 
 
-def quat_mul(q1, q2):
-    """쿼터니언 곱: q = q1 * q2   (x, y, z, w 순서)"""
-    x1, y1, z1, w1 = q1
-    x2, y2, z2, w2 = q2
-    return (
-        w1 * x2 + x1 * w2 + y1 * z2 - z1 * y2,
-        w1 * y2 - x1 * z2 + y1 * w2 + z1 * x2,
-        w1 * z2 + x1 * y2 - y1 * x2 + z1 * w2,
-        w1 * w2 - x1 * x2 - y1 * y2 - z1 * z2,
-    )
-
-
-def make_yaw_quat(yaw_rad):
-    """z축(yaw)으로 도는 쿼터니언."""
-    half = yaw_rad / 2.0
-    return (0.0, 0.0, math.sin(half), math.cos(half))
-
-
 def do_wiggle(robot, arm, logger, place, pilz_params):
-    """마지막 기어를 끼울 때 좌우로 살짝 흔든다."""
+    """
+    마지막 기어를 끼울 때 좌우로 살짝 흔든다.
+
+    흔드는 것도 결국 '손목을 돌리는 것' 이라, place 의 degree 에서
+    ±WIGGLE_YAW_DEG 만큼 더한 자리로 왔다 갔다 하면 된다.
+    """
+    기준각도 = place.get("degree", 0.0)
     logger.info(
         f"좌우 흔들기: z={WIGGLE_Z:.3f} 에서 "
         f"±{WIGGLE_YAW_DEG}도 씩 {WIGGLE_COUNT}번"
     )
 
-    # 흔들 높이까지 올라간다
-    pose = make_pose(place, DOWN)
-    pose.pose.position.z = WIGGLE_Z
-    if not plan_and_execute(robot, arm, logger,
-                            pose_goal=pose, plan_parameters=pilz_params):
-        return False
+    def 흔들자리(각도):
+        return {"x": place["x"], "y": place["y"], "z": WIGGLE_Z,
+                "degree": 기준각도 + 각도}
 
-    q_base = (DOWN["x"], DOWN["y"], DOWN["z"], DOWN["w"])
-    yaw_rad = math.radians(WIGGLE_YAW_DEG)
+    # 흔들 높이까지 올라간다
+    if not plan_and_execute(robot, arm, logger,
+                            pose_goal=make_pose(흔들자리(0.0)),
+                            plan_parameters=pilz_params):
+        return False
 
     for i in range(1, WIGGLE_COUNT + 1):
         for sign, mark in ((+1, "+"), (-1, "-")):
-            q = quat_mul(make_yaw_quat(sign * yaw_rad), q_base)
-            pose.pose.orientation.x = q[0]
-            pose.pose.orientation.y = q[1]
-            pose.pose.orientation.z = q[2]
-            pose.pose.orientation.w = q[3]
-
             logger.info(f"흔들기 {i}/{WIGGLE_COUNT}: {mark}{WIGGLE_YAW_DEG:.1f}도")
-            if not plan_and_execute(robot, arm, logger,
-                                    pose_goal=pose, plan_parameters=pilz_params):
+            if not plan_and_execute(
+                    robot, arm, logger,
+                    pose_goal=make_pose(흔들자리(sign * WIGGLE_YAW_DEG)),
+                    plan_parameters=pilz_params):
                 return False
 
     # 원래 자세로 되돌린다
-    pose.pose.orientation.x = q_base[0]
-    pose.pose.orientation.y = q_base[1]
-    pose.pose.orientation.z = q_base[2]
-    pose.pose.orientation.w = q_base[3]
     return plan_and_execute(robot, arm, logger,
-                            pose_goal=pose, plan_parameters=pilz_params)
+                            pose_goal=make_pose(흔들자리(0.0)),
+                            plan_parameters=pilz_params)
 
 
 def assemble_one(robot, arm, logger, gripper, task, pilz_params, is_last):
     """기어 하나를 집어서 놓는다. 성공하면 True."""
     pick, place = task["pick"], task["place"]
+    logger.info(f"  집는 자리 {describe_pos(pick)}")
+    logger.info(f"  놓는 자리 {describe_pos(place)}")
 
     # 1) 집는 자리 위로
     logger.info("  · 집는 자리 위로")
     if not plan_and_execute(robot, arm, logger,
-                            pose_goal=make_pose(pick, DOWN, APPROACH_OFFSET),
+                            pose_goal=make_pose(pick, z_offset=APPROACH_OFFSET),
                             plan_parameters=pilz_params):
         return False
 
     # 2) 집는 자리로 내려가기
     logger.info("  · 집는 자리로 내려가기")
     if not plan_and_execute(robot, arm, logger,
-                            pose_goal=make_pose(pick, DOWN),
+                            pose_goal=make_pose(pick),
                             plan_parameters=pilz_params):
         return False
 
@@ -176,14 +166,14 @@ def assemble_one(robot, arm, logger, gripper, task, pilz_params, is_last):
     # 4) 다시 위로
     logger.info("  · 들어 올리기")
     if not plan_and_execute(robot, arm, logger,
-                            pose_goal=make_pose(pick, DOWN, APPROACH_OFFSET),
+                            pose_goal=make_pose(pick, z_offset=APPROACH_OFFSET),
                             plan_parameters=pilz_params):
         return False
 
     # 5) 놓는 자리 위로
     logger.info("  · 놓는 자리 위로")
     if not plan_and_execute(robot, arm, logger,
-                            pose_goal=make_pose(place, DOWN, APPROACH_OFFSET),
+                            pose_goal=make_pose(place, z_offset=APPROACH_OFFSET),
                             plan_parameters=pilz_params):
         return False
 
@@ -195,7 +185,7 @@ def assemble_one(robot, arm, logger, gripper, task, pilz_params, is_last):
     # 7) 놓는 자리로 내려가기
     logger.info("  · 놓는 자리로 내려가기")
     if not plan_and_execute(robot, arm, logger,
-                            pose_goal=make_pose(place, DOWN),
+                            pose_goal=make_pose(place),
                             plan_parameters=pilz_params):
         return False
 
@@ -207,7 +197,7 @@ def assemble_one(robot, arm, logger, gripper, task, pilz_params, is_last):
     # 9) 다시 위로 빠져나오기
     logger.info("  · 빠져나오기")
     return plan_and_execute(robot, arm, logger,
-                            pose_goal=make_pose(place, DOWN, APPROACH_OFFSET),
+                            pose_goal=make_pose(place, z_offset=APPROACH_OFFSET),
                             plan_parameters=pilz_params)
 
 

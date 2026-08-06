@@ -28,7 +28,11 @@ voice_robot_node.py — ⑧ 음성 명령 실행 노드  [Module-7 이어서]
 
 ■ 실습
   · GEAR_TASKS 좌표를 우리 작업대에 맞게 고쳐 보세요.
+  · degree 를 넣으면 집게를 그만큼 돌려서 집고 놓습니다.
   · JOG_STEP 을 바꿔 "앞으로" 한 번에 얼마나 갈지 조절해 보세요.
+
+  my_actions.yaml 의 '이동' 에도 degree 를 넣을 수 있습니다.
+      - 이동: {x: 0.4, y: 0.1, z: 0.3, degree: 90}
 """
 
 import os
@@ -44,8 +48,8 @@ from std_msgs.msg import String
 
 from .gripper_control import connect_gripper, is_gripping, wait_until_done
 from .robot_common import (
-    DOWN, current_tcp, go_home, make_home_state, make_plan_params, make_pose,
-    plan_and_execute, setup_robot,
+    current_tcp, go_home, make_home_state, make_joint_state, make_plan_params,
+    make_pose, plan_and_execute, setup_robot,
 )
 
 
@@ -54,22 +58,30 @@ from .robot_common import (
 # ══════════════════════════════════════════════════════════
 
 # 기어를 어디서 집어 어디에 놓을지 (base_link 기준, 단위 m)
+#
+#   권장 범위   x      :  0.30 ~ 0.60    앞으로 나간 거리
+#               y      : -0.30 ~ 0.30    왼쪽(+) / 오른쪽(-)
+#               z      :  0.27 ~ 0.60    높이
+#               degree : -180 ~ 180      집게를 돌리는 각도 [도]
+#   x < 0, |y| > 0.3, z < 0.27 은 자동으로 잘리고 경고가 뜹니다.
+#   degree 는 기어가 비스듬히 놓여 있을 때 씁니다. 안 적으면 0 입니다.
+#   너무 멀면(팔 길이 0.9m) 범위 안이어도 "계획 실패" 가 뜹니다.
 GEAR_TASKS = [
     {   # 1번 기어
-        "pick":  {"x": 0.393, "y":  0.094, "z": 0.280},
-        "place": {"x": 0.393, "y": -0.206, "z": 0.280},
+        "pick":  {"x": 0.393, "y":  0.094, "z": 0.280, "degree": 0},
+        "place": {"x": 0.393, "y": -0.206, "z": 0.280, "degree": 0},
     },
     {   # 2번 기어
-        "pick":  {"x": 0.392, "y":  0.200, "z": 0.280},
-        "place": {"x": 0.392, "y": -0.101, "z": 0.280},
+        "pick":  {"x": 0.392, "y":  0.200, "z": 0.280, "degree": 0},
+        "place": {"x": 0.392, "y": -0.101, "z": 0.280, "degree": 0},
     },
     {   # 3번 기어
-        "pick":  {"x": 0.486, "y":  0.153, "z": 0.280},
-        "place": {"x": 0.486, "y": -0.149, "z": 0.280},
+        "pick":  {"x": 0.486, "y":  0.153, "z": 0.280, "degree": 0},
+        "place": {"x": 0.486, "y": -0.149, "z": 0.280, "degree": 0},
     },
     {   # 4번 기어
-        "pick":  {"x": 0.427, "y":  0.148, "z": 0.280},
-        "place": {"x": 0.426, "y": -0.153, "z": 0.280},
+        "pick":  {"x": 0.427, "y":  0.148, "z": 0.280, "degree": 0},
+        "place": {"x": 0.426, "y": -0.153, "z": 0.280, "degree": 0},
     },
 ]
 
@@ -283,23 +295,21 @@ class VoiceRobot:
             if not isinstance(value, dict) or not all(k in value for k in "xyz"):
                 self.log.error(f"'이동' 은 x, y, z 가 모두 필요합니다: {value}")
                 return False
+            # degree 는 안 적어도 된다 (안 적으면 0).
             return self.move(value)
 
         if kind == "관절":
             if not isinstance(value, (list, tuple)) or len(value) != 6:
                 self.log.error(f"'관절' 은 각도 6개가 필요합니다: {value}")
                 return False
-            from .robot_common import plan_and_execute as _pe
+            state = make_joint_state(
+                self.robot,
+                {f"joint_{i}": v for i, v in enumerate(value, start=1)},
+                self.log)
             self.arm.set_start_state_to_current_state()
-            state = make_home_state(self.robot)
-            state.joint_positions = {
-                f"joint_{i}": float(v) * 3.141592653589793 / 180.0
-                for i, v in enumerate(value, start=1)
-            }
-            state.update()
             self.arm.set_goal_state(robot_state=state)
-            return _pe(self.robot, self.arm, self.log,
-                       plan_parameters=self.home_params)
+            return plan_and_execute(self.robot, self.arm, self.log,
+                                    plan_parameters=self.home_params)
 
         if kind in ("집기", "놓기"):
             what = "pick" if kind == "집기" else "place"
@@ -418,8 +428,9 @@ class VoiceRobot:
         return self.move(spot, APPROACH_OFFSET)
 
     def move(self, spot, z_offset=0.0) -> bool:
+        # spot 에 degree 가 있으면 make_pose 가 알아서 손목을 돌려준다.
         return plan_and_execute(self.robot, self.arm, self.log,
-                                pose_goal=make_pose(spot, DOWN, z_offset),
+                                pose_goal=make_pose(spot, z_offset=z_offset),
                                 plan_parameters=self.pilz_params)
 
     def say(self, text: str):

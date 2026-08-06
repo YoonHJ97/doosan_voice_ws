@@ -31,7 +31,7 @@ from geometry_msgs.msg import PoseStamped
 from sensor_msgs.msg import JointState
 from std_msgs.msg import String
 
-from .pose_utils import quat_to_rpy_deg
+from .pose_utils import quat_to_rpy_deg, quat_to_wrist_deg
 
 
 def _n(value: float, digits: int) -> str:
@@ -130,8 +130,11 @@ class PositionViewer(Node):
 
     def _describe(self, t, q) -> str:
         roll, pitch, yaw = quat_to_rpy_deg(q.x, q.y, q.z, q.w)
+        # 손목 각도 = 노드 파일의 degree 에 그대로 적을 수 있는 값
+        wrist = quat_to_wrist_deg(q.x, q.y, q.z, q.w)
         text = (f'손끝 위치   x={_n(t.x, 3)}  y={_n(t.y, 3)}  z={_n(t.z, 3)}  [m]\n'
-                f'  손끝 방향   {_n(roll, 0)} / {_n(pitch, 0)} / {_n(yaw, 0)}  [도]')
+                f'  손끝 방향   {_n(roll, 0)} / {_n(pitch, 0)} / {_n(yaw, 0)}  [도]\n'
+                f'  손목 각도   degree={_n(wrist, 0)}  [도]')
         if self._joint_deg:
             joints = '  '.join(
                 f'J{i}={_n(self._joint_deg[f"joint_{i}"], 0)}'
@@ -167,9 +170,13 @@ class PositionViewer(Node):
             return
 
         p = self._last_pose.pose.position
+        q = self._last_pose.pose.orientation
+        wrist = quat_to_wrist_deg(q.x, q.y, q.z, q.w)
         stamp = datetime.now().strftime('%m월 %d일 %H:%M')
-        block = (f'  # {stamp} 에 저장\n'
-                 f'  {name}: {{x: {p.x:.3f}, y: {p.y:.3f}, z: {p.z:.3f}}}\n')
+        # degree 까지 적어 두면 노드 파일에 그대로 복사해 쓸 수 있다.
+        한줄 = (f'{name}: {{x: {p.x:.3f}, y: {p.y:.3f}, z: {p.z:.3f}, '
+               f'degree: {wrist:.0f}}}')
+        block = f'  # {stamp} 에 저장\n  {한줄}\n'
 
         try:
             first_time = not os.path.exists(self._record_file)
@@ -184,8 +191,7 @@ class PositionViewer(Node):
             return
 
         self.get_logger().info(
-            f"'{name}' 저장 완료 → {self._record_file}\n"
-            f"  {name}: {{x: {p.x:.3f}, y: {p.y:.3f}, z: {p.z:.3f}}}")
+            f"'{name}' 저장 완료 → {self._record_file}\n  {한줄}")
 
 
 def main(args=None):
