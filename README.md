@@ -174,6 +174,58 @@ source ~/.bashrc
 이 한 줄이 ROS 2 → `moveit_py` → 두산 패키지 → 이 워크스페이스를 **전부** 끌어옵니다.
 따로 `ros2_ws` 나 `ws_moveit` 을 source 하지 마세요.
 
+### 빌드도 한 줄로 — `dvb`
+
+빌드할 때마다 `cd` 하고 `colcon build` 하고 다시 `source` 하는 게 번거로우면
+`~/.bashrc` 맨 아래에 이 함수를 넣어 두세요.
+
+```bash
+# 두산 음성 로봇 워크스페이스 — 빌드 + source 한 번에
+#   dvb                                        전체 빌드
+#   dvb --packages-select voice_robot_control  한 패키지만 빌드
+dvb() {
+    local ws=~/doosan_voice_ws
+    if [ ! -d "$ws" ]; then
+        echo "$ws 가 없습니다."
+        return 1
+    fi
+    # 빌드 전에 밑바탕부터 잡는다.
+    # 이걸 안 하면 install/setup.bash 에 연결 고리가 안 적혀서
+    # 나중에 source 해도 moveit_py 와 두산 패키지를 못 찾는다.
+    source /opt/ros/humble/setup.bash
+    [ -f ~/moveit_py_ws/install/local_setup.bash ] && source ~/moveit_py_ws/install/local_setup.bash
+    [ -f ~/ros2_ws/install/local_setup.bash ]      && source ~/ros2_ws/install/local_setup.bash
+
+    cd "$ws" || return 1
+    colcon build --symlink-install "$@" || {
+        echo "빌드 실패 — 위의 오류를 먼저 고치세요. (source 하지 않았습니다)"
+        return 1
+    }
+    source "$ws/install/setup.bash"
+    echo "doosan_voice_ws is built & activated!"
+}
+```
+
+넣은 뒤 `source ~/.bashrc` 한 번 하면 그다음부터 `dvb` 만 치면 됩니다.
+
+> **`source` 세 줄이 왜 빌드보다 먼저 나오나요?**
+> colcon 은 **빌드할 때 잡혀 있던 것만** `install/setup.bash` 에 적어 넣습니다.
+> 밑바탕을 안 잡고 빌드하면 연결 고리가 지워져서, 나중에 아무리 source 해도
+> `ModuleNotFoundError: No module named 'moveit'` 이 납니다.
+> 그때는 위 세 줄을 source 한 새 터미널에서 다시 빌드하면 복구됩니다.
+
+빌드에 실패하면 **source 하지 않고 멈춥니다.** 고장 난 빌드를 source 해서
+옛날 코드가 그대로 도는 것을 막기 위해서입니다.
+
+### 그 밖에 쓸 만한 alias
+
+```bash
+alias ros2_ws="source ~/ros2_ws/install/local_setup.bash; echo \"ros2_ws is activated!\""
+```
+
+> 두산 패키지(`~/ros2_ws`)만 따로 손볼 때 씁니다.
+> 평소 이 워크스페이스를 쓸 때는 **필요 없습니다** — 위의 `setup.bash` 한 줄이 다 끌어옵니다.
+
 > **주의 — MoveIt 은 한 곳에서만 오게 하세요.**
 > apt 로 깐 MoveIt 과 소스로 빌드한 MoveIt(`~/ws_moveit`)을 **둘 다 source 하면**
 > 버전이 엉켜서 `move_group` 이 죽고 RViz 플러그인이 안 뜹니다.
