@@ -24,13 +24,8 @@ order_node.py 를 **블록코딩처럼 한 줄씩** 쓸 수 있게, 복잡한 �
 (수업 중에 한 곳이 안 된다고 전부 멈춰 버리면 곤란하기 때문이다)
 """
 
-import hashlib
 import os
-import tempfile
 import time
-
-# pygame 이 시작할 때 찍는 광고 문구를 감춘다. import 보다 먼저 해야 한다.
-os.environ.setdefault("PYGAME_HIDE_SUPPORT_PROMPT", "hide")
 
 import rclpy
 from rclpy.logging import get_logger
@@ -39,6 +34,8 @@ from std_msgs.msg import String
 from .gripper_control import connect_gripper, is_gripping, wait_until_done
 # 손목 각도 다루기. 순수 계산이라 MoveIt 이 없어도 불러올 수 있다.
 from .pose_utils import wrap_deg
+# 말하기(TTS) 는 ⑧ voice_robot_node 와 똑같은 것을 쓴다.
+from .speaker import Speaker
 
 # 로봇 팔을 움직이는 부분은 MoveIt 이 필요하다.
 # MoveIt 이 없는 컴퓨터에서도 '말하고 듣기' 는 연습할 수 있도록,
@@ -93,8 +90,7 @@ _인식기 = None
 _마이크 = None
 _우편함 = []             # /stt_result 로 들어온 말을 담아 두는 곳
 
-_스피커켜짐 = False
-_스피커_해봤나 = False   # 준비() 없이 말하기() 만 불렀을 때 한 번만 켜 보려고
+_스피커 = None           # speaker.Speaker — 말하는 담당
 
 
 # ══════════════════════════════════════════════════════════
@@ -150,41 +146,9 @@ def 준비(로봇=True, 마이크=True):
 # ══════════════════════════════════════════════════════════
 def _스피커_준비():
     """gTTS + pygame 을 켠다. 안 되면 글자로만 보여준다."""
-    global _스피커켜짐, _스피커_해봤나
-    _스피커_해봤나 = True
-    try:
-        import pygame
-        from gtts import gTTS      # noqa: F401  (있는지만 확인)
-
-        pygame.mixer.init()
-        _스피커켜짐 = True
-    except Exception as e:
-        _스피커켜짐 = False
-        _로그.warning(
-            f"소리를 낼 수 없어 글자로만 보여줍니다: {e}\n"
-            "  설치: pip install gtts pygame\n"
-            "  → 실습은 그대로 진행됩니다."
-        )
-
-
-def _소리파일(문장: str) -> str:
-    """
-    문장을 mp3 로 만들어 그 파일 경로를 돌려준다.
-
-    한 번 만든 문장은 저장해 두고 다시 쓴다. 같은 인사말을 손님마다
-    구글 서버에서 다시 받아오면 그때마다 1~2초씩 멈추기 때문이다.
-    """
-    폴더 = os.path.join(tempfile.gettempdir(), "voice_robot_tts")
-    os.makedirs(폴더, exist_ok=True)
-
-    이름 = hashlib.md5(f"{말하는_언어}:{문장}".encode("utf-8")).hexdigest()
-    경로 = os.path.join(폴더, f"{이름}.mp3")
-
-    if not os.path.exists(경로):
-        from gtts import gTTS
-        gTTS(text=문장, lang=말하는_언어).save(경로)
-
-    return 경로
+    global _스피커
+    _스피커 = Speaker(_로그, 말하는_언어)
+    _스피커.setup()
 
 
 def 말하기(*내용, sep=" ") -> bool:
@@ -195,6 +159,9 @@ def 말하기(*내용, sep=" ") -> bool:
       말하기("콜라", "가져다 드릴게요")     ← 여러 개를 주면 띄어쓰기로 이어 붙인다
       말하기("남은 개수는", 3, "개입니다")  ← 숫자를 그냥 넣어도 된다
       말하기("가", "나", "다", sep="")      ← 붙여서 말하고 싶으면
+
+    다 말할 때까지 기다린다. 안 기다리면 말하는 도중에 다음 줄로 넘어가
+    로봇이 먼저 움직여 버린다.
     """
     global _로그
     문장 = sep.join(str(x) for x in 내용)
@@ -202,34 +169,11 @@ def 말하기(*내용, sep=" ") -> bool:
     # 준비() 를 안 부르고 말하기() 부터 써도 되게 한다.
     if _로그 is None:
         _로그 = get_logger("order_node")
-    if not _스피커_해봤나:
+    if _스피커 is None:
         _스피커_준비()
 
     _로그.info(f'[말] "{문장}"')
-
-    if not _스피커켜짐 or not 문장:
-        return False
-
-    try:
-        import pygame
-        pygame.mixer.music.load(_소리파일(문장))
-        pygame.mixer.music.play()
-
-        # 다 말할 때까지 기다린다. 안 기다리면 말하는 도중에 다음 줄로 넘어가
-        # 로봇이 먼저 움직여 버린다.
-        while pygame.mixer.music.get_busy():
-            time.sleep(0.1)
-
-        if hasattr(pygame.mixer.music, "unload"):
-            pygame.mixer.music.unload()
-        return True
-    except Exception as e:
-        _로그.warning(
-            f"말하지 못했습니다: {e}\n"
-            "  · 인터넷이 연결돼 있는지 확인하세요 (구글 서버에서 소리를 받아옵니다)\n"
-            "  · 스피커가 연결돼 있는지 확인하세요"
-        )
-        return False
+    return _스피커.say(문장)
 
 
 # ══════════════════════════════════════════════════════════

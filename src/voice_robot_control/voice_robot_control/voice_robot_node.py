@@ -8,7 +8,8 @@ voice_robot_node.py — ⑧ 음성 명령 실행 노드  [Module-7 이어서]
     마이크 → ⑥ stt_node → ⑦ nlp_node → ⑧ 이 노드 → 로봇
 
     받는 것:  /robot_command   (⑦ 이 보냄)
-    내보내는 것: /robot_status  (지금 뭘 했는지. 나중에 ⑧ TTS 가 읽어 줌)
+    내보내는 것: /robot_status  (지금 뭘 했는지. 다른 프로그램이 받아 쓸 수 있게)
+                 + 스피커로도 같은 말을 읽어 줍니다 (USE_TTS)
 
     ros2 launch voice_robot_control voice_robot.launch.py
 
@@ -51,6 +52,8 @@ from .robot_common import (
     current_tcp, go_home, make_home_state, make_joint_state, make_plan_params,
     make_pose, plan_and_execute, setup_robot,
 )
+# 말하기(TTS) 는 ⑨ blocks.py 와 똑같은 것을 쓴다.
+from .speaker import Speaker
 
 
 # ══════════════════════════════════════════════════════════
@@ -90,6 +93,12 @@ APPROACH_OFFSET = 0.05
 
 # "앞으로" 한 번에 움직이는 거리 [m]
 JOG_STEP = 0.05
+
+# 한 일을 스피커로 읽어 줄까?
+#   True  = 소리로 말합니다 (gtts, pygame 이 없으면 알려주고 글자로만)
+#   False = /robot_status 토픽과 화면에만 남깁니다
+USE_TTS = True
+TTS_LANG = "ko"         # 영어로 하려면 "en"
 
 # 그리퍼
 USE_GRIPPER = True
@@ -169,9 +178,25 @@ class VoiceRobot:
         self.actions = load_actions(logger)
         self.status_pub = node.create_publisher(String, "/robot_status", 10)
 
+        # 말하기 준비. 소리를 못 내도 실습은 그대로 진행된다.
+        self.speaker = Speaker(logger, TTS_LANG) if USE_TTS else None
+        if self.speaker is None:
+            logger.info("USE_TTS = False — /robot_status 토픽으로만 알립니다.")
+        elif self.speaker.setup():
+            logger.info("한 일을 스피커로 읽어 줍니다.")
+
         # 명령을 줄 세운다. 로봇은 한 번에 하나만 할 수 있다.
         self.jobs = queue.Queue()
         threading.Thread(target=self._worker, daemon=True).start()
+
+        # 말도 따로 줄을 세워 다른 스레드에서 읽는다.
+        #
+        # 로봇을 움직이는 스레드가 직접 말하게 하면, gTTS 가 구글 서버에서
+        # 소리를 받아오는 1~2초 동안 팔이 멈춰 서서 기다린다. "전체 조립"
+        # 처럼 기어마다 한 마디씩 하는 경우엔 그 시간이 다 쌓인다.
+        # 그래서 말은 여기에 던져만 두고 로봇은 바로 다음 동작으로 넘어간다.
+        self.speech = queue.Queue()
+        threading.Thread(target=self._speech_worker, daemon=True).start()
 
     # ── 명령 받기 ─────────────────────────────────────
     def on_command(self, msg: String):
@@ -181,13 +206,10 @@ class VoiceRobot:
 
         # 정지는 줄을 서지 않고 바로 처리한다
         if text == "stop":
-            dropped = 0
-            while not self.jobs.empty():
-                try:
-                    self.jobs.get_nowait()
-                    dropped += 1
-                except queue.Empty:
-                    break
+            dropped = self._drain(self.jobs)
+            # 취소한 일을 계속 읽어 주면 안 되니 하려던 말도 같이 버린다.
+            # (이미 말하는 중인 한 마디는 끝까지 간다)
+            self._drain(self.speech)
             self.say(f"정지 — 기다리던 명령 {dropped}개를 취소했습니다.")
             self.log.warn(
                 "정지했습니다.\n"
@@ -198,6 +220,32 @@ class VoiceRobot:
         waiting = self.jobs.qsize()
         if waiting > 1:
             self.log.info(f"줄 세웠습니다 — 앞에 {waiting - 1}개 있음")
+
+    @staticmethod
+    def _drain(q) -> int:
+        """줄에 서 있는 것을 다 버리고, 몇 개를 버렸는지 돌려준다."""
+        dropped = 0
+        while not q.empty():
+            try:
+                q.get_nowait()
+                dropped += 1
+            except queue.Empty:
+                break
+        return dropped
+
+    # ── 줄 서 있는 말을 하나씩 읽어 준다 ──────────────
+    def _speech_worker(self):
+        while rclpy.ok():
+            try:
+                text = self.speech.get(timeout=1.0)
+            except queue.Empty:
+                continue
+
+            # 말하다 문제가 생겨도 로봇은 계속 움직여야 한다.
+            try:
+                self.speaker.say(text)
+            except Exception as e:
+                self.log.warn(f"말하지 못했습니다: {e}")
 
     # ── 줄에서 하나씩 꺼내 실행 ───────────────────────
     def _worker(self):
@@ -434,10 +482,18 @@ class VoiceRobot:
                                 plan_parameters=self.pilz_params)
 
     def say(self, text: str):
-        """지금 뭘 했는지 알린다 (나중에 TTS 가 읽어 줌)."""
+        """
+        지금 뭘 했는지 알린다. 토픽으로도 내보내고 스피커로도 읽어 준다.
+
+        여기서 기다리지 않는다. 말은 줄에 던져만 두고 바로 돌아온다.
+        (로봇을 움직이는 쪽에서 부르기 때문이다 — _speech_worker 참고)
+        """
         msg = String()
         msg.data = text
         self.status_pub.publish(msg)
+
+        if self.speaker is not None:
+            self.speech.put(text)
 
 
 def _describe(step) -> str:

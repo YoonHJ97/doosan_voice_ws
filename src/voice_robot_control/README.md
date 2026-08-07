@@ -15,7 +15,7 @@
 | ⑤ `gear_assembly_node` | 기어 여러 개를 순서대로 조립 | ○ | ○ |
 | ⑥ `stt_node` | 말을 알아듣고 글자로 바꾸기 | — | — |
 | ⑦ `nlp_node` | 글자를 로봇 명령으로 바꾸기 | — | — |
-| ⑧ `voice_robot_node` | **명령을 받아 실제로 로봇을 움직이기** | ○ | ○ |
+| ⑧ `voice_robot_node` | **명령을 받아 로봇을 움직이고 한 일을 말해 주기** | ○ | ○ |
 | ⑨ `order_node` | **팀 프로젝트 — 말로 물어보고 시킨 작업 하기** | ○ | ○ |
 | `position_viewer` | 손끝이 지금 어디 있는지 보여주기 | — | — |
 
@@ -410,7 +410,7 @@ ros2 topic pub --once /stt_result std_msgs/msg/String "data: '기어 2번 집어
 ```bash
 ros2 topic echo /stt_result      # ⑥ 이 뭘 알아들었나
 ros2 topic echo /robot_command   # ⑦ 이 뭘 만들었나
-ros2 topic echo /robot_status    # ⑧ 이 뭘 했나
+ros2 topic echo /robot_status    # ⑧ 이 뭘 했나 (스피커로도 같은 말이 나옵니다)
 ```
 
 ### ⑧ `voice_robot_node.py`
@@ -419,9 +419,25 @@ ros2 topic echo /robot_status    # ⑧ 이 뭘 했나
 GEAR_TASKS = [ ... ]       # 기어 좌표 (⑤ 와 같은 값)
 APPROACH_OFFSET = 0.05     # 위에서 접근하는 높이 [m]
 JOG_STEP = 0.05            # "앞으로" 한 번에 갈 거리 [m]
+USE_TTS = True             # 한 일을 스피커로 읽어 줄까?
+TTS_LANG = "ko"            # 영어로 하려면 "en"
 USE_GRIPPER = True
 SPEED = 0.15
 ```
+
+**한 일을 소리로 알려 줍니다.** `pickplace 2` 를 끝내면 스피커가
+"pickplace 2 완료" 라고 읽어 줍니다. 같은 말이 `/robot_status` 토픽으로도
+나가니, 소리를 끄고(`USE_TTS = False`) 토픽만 쓸 수도 있습니다.
+
+> `gtts` / `pygame` 이 없으면 알려주고 **글자로만** 보여줍니다. 실습은 그대로
+> 진행됩니다. 소리를 내려면 `pip install gtts pygame` 하세요.
+> 첫 문장은 구글 서버에서 받아오느라 1~2초 걸리고, 같은 문장은 저장해 두고
+> 다시 씁니다.
+
+> **로봇은 말이 끝날 때까지 기다리지 않습니다.** 말하기는 따로 스레드를
+> 두고 처리합니다. 안 그러면 "전체 조립" 처럼 기어마다 한 마디씩 하는 경우
+> 소리를 받아오는 시간이 다 쌓여서 팔이 멈춰 서 있게 됩니다.
+> `정지` 라고 하면 기다리던 명령과 함께 **하려던 말도 같이 버립니다.**
 
 알아듣는 명령 (⑦ 이 만들어 보내는 것과 같습니다)
 
@@ -652,7 +668,7 @@ ros2 topic pub --once /record_pose std_msgs/msg/String "data: '내자리'"
 | `구글 음성 인식 서버에 연결하지 못했습니다` | 인터넷 연결을 확인하세요 (⑥ 은 인터넷이 필요합니다) |
 | 소음까지 계속 알아들음 | `ENERGY_THRESHOLD` 를 올리세요 (이 컴퓨터는 4000~5500 정도) |
 | `아는 낱말이 하나도 없습니다` | `keyword_map.yaml` 에 그 말을 추가하고 ⑦ 을 다시 켜세요 |
-| `소리를 낼 수 없어 글자로만 보여줍니다` | ⑨ 의 TTS 입니다. `pip install gtts pygame` 후 다시 켜세요 |
+| `소리를 낼 수 없어 글자로만 보여줍니다` | ⑧⑨ 의 TTS 입니다. `pip install gtts pygame` 후 다시 켜세요 |
 | ⑨ 가 `/stt_result 를 기다립니다` | 마이크를 못 열었습니다. 다른 터미널에서 `ros2 topic pub` 로 시키거나 마이크를 확인하세요 |
 | `몇 번인지 말해주세요` | "기어 2번 집어" 처럼 번호를 넣거나 "전체" 라고 하세요 |
 
@@ -678,6 +694,7 @@ voice_robot_control/
 ├── robot_common.py         여러 노드가 함께 쓰는 부분
 │                           (홈 자세, 안전 영역, 경로 계획+실행)
 ├── gripper_control.py      그리퍼 연결 (실물 없으면 시늉)
+├── speaker.py              말하기 (TTS) — ⑧ 과 ⑨ 가 같이 씁니다
 │
 │  [학생이 고치는 파일]
 │  config/keyword_map.yaml   어떤 말을 어떤 명령으로 볼지
